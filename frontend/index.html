@@ -3,49 +3,32 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Wazuh-based security monitoring dashboard">
+    <meta name="description" content="Wazuh-based security decision intelligence dashboard">
     <title>Security Monitoring Platform</title>
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
     <aside class="sidebar" aria-label="Dashboard navigation">
-      <a class="brand" href="#dashboard"><span class="brand-mark">S</span><span>Security<br>Monitoring Platform</span></a>
-      <nav class="navigation">
-        <a href="#dashboard">Dashboard</a>
-        <a href="#incidents">Incidents</a>
-        <a href="#alerts">Alerts</a>
-        <a href="#intelligence">Risk Intelligence</a>
-        <a href="#about">About</a>
-      </nav>
-      <div class="engine-status"><span>Security Engine</span><strong id="sidebar-status" class="unavailable">Checking</strong></div>
+      <a class="brand" href="#dashboard"><span class="brand-mark">S</span><span>Security Monitoring Platform<small>Decision intelligence</small></span></a>
+      <nav><a href="#dashboard">Dashboard</a><a href="#incidents">Incidents</a><a href="#alerts">Alerts</a><a href="#risk-intelligence">Risk Intelligence</a></nav>
+      <div class="engine"><span>Security Engine</span><strong id="sidebar-status">Checking</strong></div>
     </aside>
     <main id="dashboard" class="dashboard-shell">
-      <header class="topbar">
-        <div><p class="eyebrow">SOC / SECURITY INTELLIGENCE</p><h1>Security Monitoring Platform</h1><p class="subtitle">Security intelligence, correlation and incident response</p></div>
-        <div class="header-actions"><span>System Status: <strong id="connection-status">Loading</strong></span><span id="last-updated">Last updated: -</span><button id="refresh-button" class="button button-primary" type="button">Refresh</button></div>
-      </header>
-      <p id="error-message" class="error-message" role="alert" hidden></p>
-      <section class="overview-grid" aria-label="Security overview">
-        <article class="panel intelligence-summary"><p class="section-label">Security Intelligence Summary</p><h2 id="summary-heading">Current security posture</h2><p id="security-summary" class="summary-copy">Loading current security intelligence.</p></article>
-        <section class="kpi-grid" aria-label="Incident statistics">
-          <article class="kpi-card total"><span>Total Incidents</span><strong id="kpi-total">-</strong></article><article class="kpi-card critical"><span>Critical</span><strong id="kpi-critical">-</strong></article><article class="kpi-card high"><span>High</span><strong id="kpi-high">-</strong></article><article class="kpi-card medium"><span>Medium</span><strong id="kpi-medium">-</strong></article><article class="kpi-card low"><span>Low</span><strong id="kpi-low">-</strong></article>
-        </section>
+      <header class="topbar"><div><p class="eyebrow">Automated Security Analysis</p><h1>Security Monitoring Platform</h1><p>Security intelligence, correlation and incident response</p></div><div class="header-actions"><span>System Status: <strong id="connection-status">Loading</strong></span><span id="last-updated">Last updated: -</span><button id="refresh-button" type="button">Refresh</button></div></header>
+      <p id="error-message" class="error" role="alert" hidden></p>
+      <section class="command-grid">
+        <article class="posture-card"><p class="section-label">Security Posture</p><strong id="posture-level" class="posture-level">Loading</strong><p id="posture-message">Assessing current incidents.</p><div class="posture-metrics"><span>Highest Risk <b id="posture-risk">-</b></span><span>Critical <b id="posture-critical">-</b></span><span>Open Incidents <b id="posture-open">-</b></span></div></article>
+        <article class="priority-card"><p class="section-label">Priority Threat</p><div id="priority-threat"></div></article>
       </section>
-      <section class="intelligence-grid">
-        <article class="panel priority-panel"><p class="section-label">Top Priority Incident</p><div id="priority-incident" class="priority-content"></div></article>
-        <article class="panel timeline-panel"><p class="section-label">Attack Timeline</p><div id="attack-timeline" class="timeline-content"></div></article>
-        <article id="intelligence" class="panel risk-panel"><p class="section-label">Risk Intelligence</p><h2>Incident severity distribution</h2><div id="severity-distribution" class="severity-distribution"></div><h3 class="subheading">Top categories</h3><div id="top-categories" class="category-list"></div></article>
-      </section>
-      <section id="incidents" class="panel incidents-panel">
-        <div class="section-heading"><div><p class="section-label">Active Incidents</p><h2>Investigation queue</h2></div><div class="filters"><label>Severity <select id="severity-filter"><option value="">All</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select></label><label>Category <select id="category-filter"><option value="">All</option></select></label></div></div>
-        <div class="table-scroll"><table><thead><tr><th>Incident ID</th><th>Severity</th><th>Risk</th><th>Category</th><th>Subcategory</th><th>Agent</th><th>First Seen</th><th>Last Seen</th><th>Status</th></tr></thead><tbody id="incidents-body"></tbody></table></div><div id="pagination" class="pagination" aria-label="Incident pages"></div>
-      </section>
-      <section class="panel actions-panel"><p class="section-label">Recommended Actions</p><div id="recommended-actions" class="actions-content"></div></section>
-      <section id="alerts" class="panel alerts-panel"><div class="section-heading"><div><p class="section-label">Recent Alerts</p><h2>Latest security signals</h2></div></div><div class="table-scroll"><table><thead><tr><th>Time</th><th>Rule ID</th><th>Description</th><th>Category</th><th>Risk</th><th>Level</th><th>Agent</th></tr></thead><tbody id="alerts-body"></tbody></table></div></section>
-      <footer id="about" class="dashboard-footer">Automated analysis based on Wazuh alert classification, correlation, risk scoring and incident recommendations.</footer>
+      <section class="path-card"><div><p class="section-label">Correlated Attack Path</p><div id="attack-path" class="attack-path"></div><p id="correlation-insight" class="correlation-insight"></p></div><div id="correlation-counts" class="correlation-counts"></div></section>
+      <section class="decision-grid"><article class="compact-card"><p class="section-label">Why Flagged?</p><ul id="why-flagged" class="reason-list"></ul></article><article class="compact-card"><p class="section-label">Next Best Action</p><div id="next-action"></div></article></section>
+      <section class="pipeline-card"><p class="section-label">Security Analysis Pipeline</p><div id="analysis-pipeline" class="pipeline"></div></section>
+      <section class="mini-kpis" aria-label="Incident statistics"><span><b id="kpi-total">-</b> Incidents</span><span class="critical"><b id="kpi-critical">-</b> Critical</span><span class="high"><b id="kpi-high">-</b> High</span><span class="medium"><b id="kpi-medium">-</b> Medium</span><span class="low"><b id="kpi-low">-</b> Low</span></section>
+      <section id="incidents" class="panel incidents-panel"><div class="section-heading"><div><p class="section-label">Active Incidents</p><h2>Investigation queue</h2></div><div class="filters"><label>Severity <select id="severity-filter"><option value="">All</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select></label><label>Category <select id="category-filter"><option value="">All</option></select></label></div></div><div class="table-scroll"><table><thead><tr><th>Incident ID</th><th>Severity</th><th>Risk</th><th>Category</th><th>Subcategory</th><th>Agent</th><th>First Seen</th><th>Last Seen</th><th>Status</th></tr></thead><tbody id="incidents-body"></tbody></table></div><div id="pagination" class="pagination"></div></section>
+      <section id="risk-intelligence" class="risk-intelligence"><article class="panel"><p class="section-label">Risk Intelligence</p><div id="severity-distribution"></div></article><article class="panel"><p class="section-label">Top Categories</p><div id="top-categories"></div></article></section>
+      <section id="alerts" class="panel alerts-panel"><p class="section-label">Recent Alerts</p><div class="table-scroll"><table><thead><tr><th>Time</th><th>Rule ID</th><th>Description</th><th>Category</th><th>Risk</th><th>Level</th><th>Agent</th></tr></thead><tbody id="alerts-body"></tbody></table></div></section>
     </main>
-    <aside id="incident-drawer" class="incident-drawer" aria-hidden="true" aria-label="Incident detail"><div class="drawer-header"><div><p class="section-label">Incident Detail</p><h2 id="detail-title">Incident</h2></div><button id="drawer-close" class="button button-quiet" type="button">Close</button></div><div id="incident-detail" class="detail-content"></div></aside>
-    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <aside id="incident-drawer" class="drawer" aria-hidden="true"><header><div><p class="section-label">Incident Detail</p><h2 id="detail-title">Incident</h2></div><button id="drawer-close" type="button">Close</button></header><div id="incident-detail"></div></aside><div id="drawer-backdrop" class="backdrop" hidden></div>
     <script src="/static/app.js" defer></script>
   </body>
 </html>
