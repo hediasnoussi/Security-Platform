@@ -14,10 +14,10 @@ class FrontendDeliveryTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Security Monitoring Platform", response.text)
-        self.assertIn("Security Posture", response.text)
-        self.assertIn("Priority Threat", response.text)
-        self.assertIn("Attack Correlation Flow", response.text)
-        self.assertIn("Security Activity Over Time", response.text)
+        self.assertIn("Niveau de securite", response.text)
+        self.assertIn("Menace prioritaire", response.text)
+        self.assertIn("Chemin d'attaque correle", response.text)
+        self.assertIn("Activite de securite dans le temps", response.text)
 
     def test_frontend_static_assets_are_reachable(self) -> None:
         for asset in ("/static/styles.css", "/static/app.js"):
