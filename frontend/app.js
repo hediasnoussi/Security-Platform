@@ -1,264 +1,78 @@
-const state = { incidents: [], selectedIncidentId: null, refreshing: false };
-
-const elements = {
-  incidentsBody: document.querySelector("#incidents-body"),
-  alertsBody: document.querySelector("#alerts-body"),
-  severity: document.querySelector("#severity-filter"),
-  category: document.querySelector("#category-filter"),
-  refresh: document.querySelector("#refresh-button"),
-  error: document.querySelector("#error-message"),
-  status: document.querySelector("#connection-status"),
-  updated: document.querySelector("#last-updated"),
-  distribution: document.querySelector("#severity-distribution"),
-  drawer: document.querySelector("#incident-drawer"),
-  backdrop: document.querySelector("#drawer-backdrop"),
-  detail: document.querySelector("#incident-detail"),
-  detailTitle: document.querySelector("#detail-title"),
+const state = { incidents: [], selectedId: null, page: 1, refreshing: false };
+const PAGE_SIZE = 8;
+const $ = selector => document.querySelector(selector);
+const ui = {
+  incidents: $("#incidents-body"), alerts: $("#alerts-body"), severity: $("#severity-filter"), category: $("#category-filter"),
+  refresh: $("#refresh-button"), error: $("#error-message"), status: $("#connection-status"), sidebarStatus: $("#sidebar-status"),
+  updated: $("#last-updated"), summary: $("#security-summary"), summaryHeading: $("#summary-heading"), priority: $("#priority-incident"),
+  timeline: $("#attack-timeline"), distribution: $("#severity-distribution"), categories: $("#top-categories"), actions: $("#recommended-actions"),
+  pagination: $("#pagination"), drawer: $("#incident-drawer"), backdrop: $("#drawer-backdrop"), detail: $("#incident-detail"), title: $("#detail-title"),
 };
-
-function text(value, fallback = "-") {
-  return value === null || value === undefined || value === "" ? fallback : String(value);
-}
-
+const text = (value, fallback = "-") => value === null || value === undefined || value === "" ? fallback : String(value);
+const score = value => Math.max(0, Math.min(100, Number(value) || 0));
 function formatTimestamp(value) {
   if (!value) return "-";
-  const normalized = String(value).replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return text(value);
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  }).format(date);
+  const date = new Date(String(value).replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
+  return Number.isNaN(date.getTime()) ? text(value) : new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
 }
+function severity(value) { const name = text(value, "neutral").toLowerCase(); return ["critical", "high", "medium", "low"].includes(name) ? name : "neutral"; }
+function node(tag, content, className) { const item = document.createElement(tag); if (content !== undefined) item.textContent = text(content); if (className) item.className = className; return item; }
+function badge(value) { return node("span", value, `badge badge-${severity(value)}`); }
+function cell(value) { return node("td", value); }
+async function request(path) { const response = await fetch(path, { headers: { Accept: "application/json" } }); if (!response.ok) throw new Error(`${path} returned ${response.status}`); return response.json(); }
+function topIncident() { return [...state.incidents].sort((a, b) => score(b.risk_score) - score(a.risk_score))[0] || null; }
+function empty(parent, message) { parent.replaceChildren(node("p", message, "empty-state")); }
 
-function severityClass(value) {
-  const normalized = text(value, "neutral").toLowerCase();
-  return ["critical", "high", "medium", "low"].includes(normalized) ? normalized : "neutral";
+function setHealth(health) { const healthy = health && health.status === "ok"; [ui.status, ui.sidebarStatus].forEach(element => { element.textContent = healthy ? "Healthy" : "Unavailable"; element.className = healthy ? "healthy" : "unavailable"; }); }
+function renderKpis(stats) { [["total", "total_incidents"], ["critical", "critical"], ["high", "high"], ["medium", "medium"], ["low", "low"]].forEach(([id, key]) => { $(`#kpi-${id}`).textContent = text(stats[key], "0"); }); }
+function renderSummary(stats, incident) {
+  const total = Number(stats.total_incidents) || 0; if (!total) { ui.summaryHeading.textContent = "No active incidents"; ui.summary.textContent = "No incidents are currently being monitored."; return; }
+  const critical = Number(stats.critical) || 0; const dominant = [["Critical", stats.critical], ["High", stats.high], ["Medium", stats.medium], ["Low", stats.low]].sort((a, b) => Number(b[1]) - Number(a[1]))[0][0];
+  ui.summaryHeading.textContent = critical ? "Immediate analyst attention required" : "Current security posture";
+  const condition = incident ? `${text(incident.category)} is the highest-risk condition at ${score(incident.risk_score)}/100.` : "No priority incident is available.";
+  ui.summary.textContent = `${critical ? `${critical} critical incident${critical === 1 ? " requires" : "s require"} immediate attention.` : "No critical incidents are currently recorded."} ${total} incident${total === 1 ? " is" : "s are"} being monitored. Most active incidents are ${dominant} severity. ${condition}`;
 }
-
-function createBadge(value) {
-  const badge = document.createElement("span");
-  badge.className = `badge badge-${severityClass(value)}`;
-  badge.textContent = text(value);
-  return badge;
+function renderPriority(incident) {
+  if (!incident) return empty(ui.priority, "No active incident is available.");
+  const wrap = node("div", undefined, "priority-layout"); const gauge = node("div", undefined, `risk-gauge ${severity(incident.severity)}`); gauge.style.setProperty("--score", `${score(incident.risk_score) * 3.6}deg`); gauge.append(node("strong", score(incident.risk_score)), node("span", "/100"), node("small", incident.severity));
+  const body = document.createElement("div"); const title = node("h2", incident.title); const description = node("p", incident.description, "priority-description"); const facts = node("div", undefined, "priority-facts");
+  [["Incident", incident.incident_id], ["Category", incident.category], ["Subcategory", incident.subcategory], ["Agent", incident.agent_name || incident.agent_id], ["First seen", formatTimestamp(incident.first_seen)], ["Last seen", formatTimestamp(incident.last_seen)], ["Status", incident.status]].forEach(([label, value]) => facts.append(node("span", `${label}: ${text(value)}`)));
+  const summary = node("p", `${text(incident.category)} activity on ${text(incident.agent_name || incident.agent_id, "the monitored agent")} is prioritized at a risk score of ${score(incident.risk_score)}/100.`, "incident-summary");
+  const investigate = node("button", "Investigate Incident", "button button-primary"); investigate.type = "button"; investigate.addEventListener("click", () => openIncident(incident.incident_id)); body.append(badge(incident.severity), title, description, facts, summary, investigate); wrap.append(gauge, body); ui.priority.replaceChildren(wrap);
 }
-
-function createCell(value, className = "") {
-  const cell = document.createElement("td");
-  cell.textContent = text(value);
-  if (className) cell.className = className;
-  return cell;
+function renderTimeline(incident) {
+  if (!incident) return empty(ui.timeline, "No correlated incident is available.");
+  const categories = [...new Set((Array.isArray(incident.categories) ? incident.categories : []).filter(Boolean))]; if (!categories.length && incident.category) categories.push(incident.category);
+  const steps = [...categories, `${text(incident.severity)} Incident`]; const sequence = node("div", undefined, "timeline-steps"); steps.forEach((step, index) => { sequence.append(node("div", step, "timeline-step")); if (index < steps.length - 1) sequence.append(node("span", "→", "timeline-arrow")); });
+  const period = node("p", `Observed: ${formatTimestamp(incident.first_seen)} to ${formatTimestamp(incident.last_seen)}`, "timeline-period"); const happened = node("div", undefined, "what-happened"); happened.append(node("h3", "What happened?"), node("p", incident.description)); ui.timeline.replaceChildren(sequence, period, happened);
 }
-
-function createEmptyRow(body, columns, message) {
-  const row = document.createElement("tr");
-  const cell = document.createElement("td");
-  cell.colSpan = columns;
-  cell.className = "empty-cell";
-  cell.textContent = message;
-  row.append(cell);
-  body.replaceChildren(row);
+function renderRisk(stats) {
+  const total = Math.max(Number(stats.total_incidents) || 0, 1); const bars = document.createDocumentFragment(); [["Critical", "critical"], ["High", "high"], ["Medium", "medium"], ["Low", "low"]].forEach(([label, key]) => { const count = Number(stats[key]) || 0; const row = node("div", undefined, "severity-row"); const track = node("div", undefined, "bar-track"); const fill = node("div", undefined, `bar-fill ${key}`); fill.style.width = `${Math.min(100, count * 100 / total)}%`; track.append(fill); row.append(node("span", label), track, node("strong", count)); bars.append(row); }); ui.distribution.replaceChildren(bars);
+  const countByCategory = new Map(); state.incidents.forEach(item => { const category = text(item.category, "Unclassified"); countByCategory.set(category, (countByCategory.get(category) || 0) + 1); }); const list = document.createDocumentFragment(); [...countByCategory.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).forEach(([name, count]) => { const row = node("div", undefined, "category-row"); row.append(node("span", name), node("strong", count)); list.append(row); }); if (!countByCategory.size) list.append(node("p", "No category data available.", "empty-state")); ui.categories.replaceChildren(list);
 }
-
-async function request(path) {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`${path} returned ${response.status}`);
-  return response.json();
-}
-
-function setKpis(stats) {
-  [["total", "total_incidents"], ["critical", "critical"], ["high", "high"], ["medium", "medium"], ["low", "low"]]
-    .forEach(([id, key]) => { document.querySelector(`#kpi-${id}`).textContent = text(stats[key], "0"); });
-}
-
-function renderSeverityDistribution(stats) {
-  const entries = [["Critical", "critical"], ["High", "high"], ["Medium", "medium"], ["Low", "low"]];
-  const total = Math.max(Number(stats.total_incidents) || 0, 1);
-  const fragment = document.createDocumentFragment();
-  entries.forEach(([label, key]) => {
-    const count = Number(stats[key]) || 0;
-    const row = document.createElement("div"); row.className = "severity-bar-row";
-    const name = document.createElement("span"); name.textContent = label;
-    const track = document.createElement("div"); track.className = "severity-bar-track";
-    const fill = document.createElement("div"); fill.className = `severity-bar-fill ${key}`;
-    fill.style.width = `${Math.min((count / total) * 100, 100)}%`;
-    track.append(fill);
-    const countNode = document.createElement("strong"); countNode.textContent = String(count);
-    row.append(name, track, countNode); fragment.append(row);
-  });
-  elements.distribution.replaceChildren(fragment);
-}
-
-function populateCategories(incidents) {
-  const selected = elements.category.value;
-  const categories = [...new Set(incidents.map(item => text(item.category, "Unclassified")))].sort();
-  elements.category.replaceChildren(new Option("All", ""));
-  categories.forEach(category => elements.category.add(new Option(category, category)));
-  elements.category.value = categories.includes(selected) ? selected : "";
-}
-
-function filteredIncidents() {
-  return [...state.incidents]
-    .filter(item => (!elements.severity.value || item.severity === elements.severity.value)
-      && (!elements.category.value || item.category === elements.category.value))
-    .sort((left, right) => Number(right.risk_score || 0) - Number(left.risk_score || 0));
-}
-
+function fillCategories() { const selected = ui.category.value; const categories = [...new Set(state.incidents.map(item => text(item.category, "Unclassified")))].sort(); ui.category.replaceChildren(new Option("All", "")); categories.forEach(category => ui.category.add(new Option(category, category))); ui.category.value = categories.includes(selected) ? selected : ""; }
+function filtered() { return [...state.incidents].filter(item => (!ui.severity.value || item.severity === ui.severity.value) && (!ui.category.value || item.category === ui.category.value)).sort((a, b) => score(b.risk_score) - score(a.risk_score)); }
 function renderIncidents() {
-  const incidents = filteredIncidents();
-  if (!incidents.length) return createEmptyRow(elements.incidentsBody, 9, "No incidents match the current filters.");
-  const fragment = document.createDocumentFragment();
-  incidents.forEach(incident => {
-    const row = document.createElement("tr");
-    row.dataset.incidentId = text(incident.incident_id, "");
-    row.tabIndex = 0;
-    if (incident.incident_id === state.selectedIncidentId) row.classList.add("selected");
-    const severity = createCell("", "severity-cell"); severity.append(createBadge(incident.severity));
-    row.append(
-      createCell(incident.incident_id), severity, createCell(incident.risk_score), createCell(incident.category),
-      createCell(incident.subcategory), createCell(incident.agent_name || incident.agent_id),
-      createCell(formatTimestamp(incident.first_seen)), createCell(formatTimestamp(incident.last_seen)), createCell(incident.status),
-    );
-    row.addEventListener("click", () => openIncident(incident.incident_id));
-    row.addEventListener("keydown", event => {
-      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openIncident(incident.incident_id); }
-    });
-    fragment.append(row);
-  });
-  elements.incidentsBody.replaceChildren(fragment);
+  const incidents = filtered(); const pageCount = Math.max(1, Math.ceil(incidents.length / PAGE_SIZE)); state.page = Math.min(state.page, pageCount); const visible = incidents.slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE); const rows = document.createDocumentFragment();
+  if (!visible.length) { const row = document.createElement("tr"); const item = node("td", "No incidents match the current filters.", "empty-cell"); item.colSpan = 9; row.append(item); rows.append(row); } else visible.forEach(incident => { const row = document.createElement("tr"); row.tabIndex = 0; if (incident.incident_id === state.selectedId) row.classList.add("selected"); const severityCell = cell(""); severityCell.append(badge(incident.severity)); row.append(cell(incident.incident_id), severityCell, cell(incident.risk_score), cell(incident.category), cell(incident.subcategory), cell(incident.agent_name || incident.agent_id), cell(formatTimestamp(incident.first_seen)), cell(formatTimestamp(incident.last_seen)), cell(incident.status)); const select = () => openIncident(incident.incident_id); row.addEventListener("click", select); row.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(); } }); rows.append(row); }); ui.incidents.replaceChildren(rows);
+  const pages = document.createDocumentFragment(); if (pageCount > 1) for (let page = 1; page <= pageCount; page += 1) { const button = node("button", page, page === state.page ? "page-button active" : "page-button"); button.type = "button"; button.setAttribute("aria-label", `Page ${page}`); button.addEventListener("click", () => { state.page = page; renderIncidents(); }); pages.append(button); } ui.pagination.replaceChildren(pages);
 }
-
 function renderAlerts(alerts) {
-  const recent = [...alerts].sort((left, right) => String(right.timestamp || "").localeCompare(String(left.timestamp || ""))).slice(0, 20);
-  if (!recent.length) return createEmptyRow(elements.alertsBody, 7, "No recent alerts available.");
-  const fragment = document.createDocumentFragment();
-  recent.forEach(alert => {
-    const row = document.createElement("tr");
-    const level = createCell("", "risk-cell"); level.append(createBadge(alert.risk_level));
-    row.append(
-      createCell(formatTimestamp(alert.timestamp)), createCell(alert.rule_id), createCell(alert.rule_description),
-      createCell(alert.category), createCell(alert.risk_score), level, createCell(alert.agent_name || alert.agent_id),
-    );
-    fragment.append(row);
-  });
-  elements.alertsBody.replaceChildren(fragment);
+  const rows = document.createDocumentFragment(); const recent = [...alerts].sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))).slice(0, 20); if (!recent.length) { const row = document.createElement("tr"); const item = node("td", "No recent alerts available.", "empty-cell"); item.colSpan = 7; row.append(item); rows.append(row); } else recent.forEach(alert => { const row = document.createElement("tr"); const level = cell(""); level.append(badge(alert.risk_level)); row.append(cell(formatTimestamp(alert.timestamp)), cell(alert.rule_id), cell(alert.rule_description), cell(alert.category), cell(alert.risk_score), level, cell(alert.agent_name || alert.agent_id)); rows.append(row); }); ui.alerts.replaceChildren(rows);
 }
-
-function appendDetailField(container, label, value) {
-  const item = document.createElement("div");
-  const labelNode = document.createElement("span");
-  const valueNode = document.createElement("strong");
-  labelNode.textContent = label; valueNode.textContent = text(value);
-  item.append(labelNode, valueNode); container.append(item);
+function recommendations(parent, data, message) {
+  const values = Array.isArray(data) ? data : []; if (!values.length) return empty(parent, message); const cards = [];
+  values.forEach((recommendation, index) => { const card = node("article", undefined, "recommendation"); const toggle = node("button", undefined, "recommendation-toggle"); toggle.type = "button"; toggle.setAttribute("aria-expanded", "false"); const title = node("span", recommendation.title, "recommendation-title"); toggle.append(node("span", index + 1, "action-number"), badge(recommendation.priority), title, node("span", undefined, "recommendation-indicator")); const content = node("div", undefined, "recommendation-content"); content.hidden = true; const actions = document.createElement("ol"); (Array.isArray(recommendation.actions) ? recommendation.actions : []).forEach(action => actions.append(node("li", action))); content.append(node("p", recommendation.description), node("h4", "Why this matters"), node("p", recommendation.rationale), node("h4", "Recommended actions"), actions); toggle.addEventListener("click", () => { const expand = toggle.getAttribute("aria-expanded") !== "true"; cards.forEach(current => { current.toggle.setAttribute("aria-expanded", "false"); current.content.hidden = true; current.card.classList.remove("expanded"); }); if (expand) { toggle.setAttribute("aria-expanded", "true"); content.hidden = false; card.classList.add("expanded"); } }); card.append(toggle, content); cards.push({ card, toggle, content }); }); parent.replaceChildren(...cards.map(item => item.card));
 }
-
-function renderEventIds(eventIds) {
-  const section = document.createElement("section"); section.className = "detail-section";
-  const heading = document.createElement("h3"); heading.textContent = `Linked Events (${eventIds.length})`;
-  const chips = document.createElement("div"); chips.className = "event-chips";
-  const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "link-button";
-  let expanded = false;
-  const render = () => {
-    chips.replaceChildren();
-    (expanded ? eventIds : eventIds.slice(0, 3)).forEach(eventId => {
-      const chip = document.createElement("span"); chip.className = "event-chip"; chip.textContent = text(eventId); chips.append(chip);
-    });
-    if (eventIds.length > 3) { toggle.textContent = expanded ? "Show fewer" : `+${eventIds.length - 3} more`; toggle.setAttribute("aria-expanded", String(expanded)); }
-  };
-  if (eventIds.length > 3) toggle.addEventListener("click", () => { expanded = !expanded; render(); });
-  render(); section.append(heading, chips); if (eventIds.length > 3) section.append(toggle); return section;
+function field(grid, label, value) { const item = document.createElement("div"); item.append(node("span", label), node("strong", value)); grid.append(item); }
+function eventIds(ids) { const section = node("section", undefined, "detail-section"); section.append(node("h3", `Linked event IDs (${ids.length})`)); const chips = node("div", undefined, "event-chips"); const button = node("button", undefined, "link-button"); button.type = "button"; let expanded = false; const draw = () => { chips.replaceChildren(...(expanded ? ids : ids.slice(0, 3)).map(id => node("span", id, "event-chip"))); if (ids.length > 3) { button.textContent = expanded ? "Show fewer" : `+${ids.length - 3} more`; button.setAttribute("aria-expanded", String(expanded)); } }; if (ids.length > 3) button.addEventListener("click", () => { expanded = !expanded; draw(); }); draw(); section.append(chips); if (ids.length > 3) section.append(button); return section; }
+function renderDetail(incident) {
+  ui.title.textContent = text(incident.incident_id, "Incident detail"); const content = document.createDocumentFragment(); content.append(badge(incident.severity), node("h3", incident.title), node("p", incident.description, "detail-description")); const grid = node("div", undefined, "detail-summary"); [["Incident ID", incident.incident_id], ["Severity", incident.severity], ["Risk score", `${score(incident.risk_score)} / 100`], ["Status", incident.status], ["Category", incident.category], ["Subcategory", incident.subcategory], ["Agent", incident.agent_name || incident.agent_id], ["First seen", formatTimestamp(incident.first_seen)], ["Last seen", formatTimestamp(incident.last_seen)]].forEach(([label, value]) => field(grid, label, value)); content.append(grid); const categories = node("section", undefined, "detail-section"); categories.append(node("h3", "Categories"), node("p", (Array.isArray(incident.categories) ? incident.categories : []).map(item => text(item)).join(", ") || incident.category)); const recommendationSection = node("section", undefined, "detail-section"); const recommendationList = node("div", undefined, "recommendation-list"); recommendationSection.append(node("h3", "Recommendations"), recommendationList); content.append(categories, eventIds(Array.isArray(incident.event_ids) ? incident.event_ids : []), recommendationSection); ui.detail.replaceChildren(content); recommendations(recommendationList, incident.recommendations, "No recommendations available.");
 }
-
-function renderRecommendations(recommendations) {
-  const section = document.createElement("section"); section.className = "detail-section recommendations-section";
-  const heading = document.createElement("h3"); heading.textContent = `Recommendations (${recommendations.length})`; section.append(heading);
-  let expandedIndex = null;
-  const cards = recommendations.map((recommendation, index) => {
-    const card = document.createElement("article"); card.className = "recommendation";
-    const button = document.createElement("button"); button.type = "button"; button.className = "recommendation-toggle";
-    const title = document.createElement("span"); title.className = "recommendation-title"; title.textContent = text(recommendation.title);
-    const indicator = document.createElement("span"); indicator.className = "recommendation-indicator";
-    button.append(createBadge(recommendation.priority), title, indicator);
-    const content = document.createElement("div"); content.className = "recommendation-content"; content.hidden = true;
-    const description = document.createElement("p"); description.textContent = text(recommendation.description);
-    const rationaleTitle = document.createElement("h4"); rationaleTitle.textContent = "Why this matters";
-    const rationale = document.createElement("p"); rationale.textContent = text(recommendation.rationale);
-    const actionsTitle = document.createElement("h4"); actionsTitle.textContent = "Recommended actions";
-    const actions = document.createElement("ol");
-    (Array.isArray(recommendation.actions) ? recommendation.actions : []).forEach(action => {
-      const item = document.createElement("li"); item.textContent = text(action); actions.append(item);
-    });
-    content.append(description, rationaleTitle, rationale, actionsTitle, actions);
-    button.addEventListener("click", () => {
-      expandedIndex = expandedIndex === index ? null : index;
-      cards.forEach((item, itemIndex) => {
-        const isExpanded = itemIndex === expandedIndex;
-        item.button.setAttribute("aria-expanded", String(isExpanded));
-        item.content.hidden = !isExpanded; item.card.classList.toggle("expanded", isExpanded);
-      });
-    });
-    button.setAttribute("aria-expanded", "false"); card.append(button, content);
-    return { card, button, content };
-  });
-  if (!cards.length) { const message = document.createElement("p"); message.textContent = "No recommendations available."; section.append(message); }
-  cards.forEach(item => section.append(item.card)); return section;
+function openIncident(id) { const incident = state.incidents.find(item => item.incident_id === id); if (!incident) return; state.selectedId = id; renderIncidents(); recommendations(ui.actions, incident.recommendations, "No recommendations are available for this incident."); renderDetail(incident); ui.drawer.classList.add("open"); ui.drawer.setAttribute("aria-hidden", "false"); ui.backdrop.hidden = false; }
+function closeDrawer() { ui.drawer.classList.remove("open"); ui.drawer.setAttribute("aria-hidden", "true"); ui.backdrop.hidden = true; }
+async function refresh() {
+  if (state.refreshing) return; state.refreshing = true; ui.refresh.disabled = true; ui.error.hidden = true;
+  try { const [health, stats, incidents, alerts] = await Promise.all([request("/health"), request("/statistics"), request("/incidents"), request("/alerts")]); state.incidents = Array.isArray(incidents) ? incidents : []; const priority = topIncident(); setHealth(health); renderKpis(stats || {}); fillCategories(); renderSummary(stats || {}, priority); renderPriority(priority); renderTimeline(priority); renderRisk(stats || {}); renderIncidents(); recommendations(ui.actions, (state.incidents.find(item => item.incident_id === state.selectedId) || priority || {}).recommendations, "No recommendations are available for this incident."); renderAlerts(Array.isArray(alerts) ? alerts : []); const selected = state.incidents.find(item => item.incident_id === state.selectedId); if (selected) renderDetail(selected); ui.updated.textContent = `Last updated: ${formatTimestamp(new Date().toISOString())}`; } catch (error) { setHealth(null); ui.error.textContent = `Unable to refresh dashboard data. ${text(error.message, "Please try again.")}`; ui.error.hidden = false; } finally { state.refreshing = false; ui.refresh.disabled = false; }
 }
-
-function renderIncidentDetail(incident) {
-  elements.detailTitle.textContent = text(incident.incident_id, "Incident detail");
-  const content = document.createDocumentFragment();
-  const hero = document.createElement("section"); hero.className = "detail-hero";
-  const severity = createBadge(incident.severity);
-  const title = document.createElement("h3"); title.textContent = text(incident.title);
-  const description = document.createElement("p"); description.textContent = text(incident.description);
-  hero.append(severity, title, description); content.append(hero);
-  const grid = document.createElement("div"); grid.className = "detail-summary";
-  appendDetailField(grid, "Incident ID", incident.incident_id); appendDetailField(grid, "Title", incident.title);
-  appendDetailField(grid, "Severity", incident.severity); appendDetailField(grid, "Risk score", incident.risk_score);
-  appendDetailField(grid, "Status", incident.status);
-  appendDetailField(grid, "Category", incident.category); appendDetailField(grid, "Subcategory", incident.subcategory);
-  appendDetailField(grid, "Agent", incident.agent_name || incident.agent_id);
-  appendDetailField(grid, "First seen", formatTimestamp(incident.first_seen)); appendDetailField(grid, "Last seen", formatTimestamp(incident.last_seen));
-  content.append(grid);
-  const categories = document.createElement("section"); categories.className = "detail-section";
-  const categoriesTitle = document.createElement("h3"); categoriesTitle.textContent = "Categories";
-  const categoriesText = document.createElement("p");
-  categoriesText.textContent = (Array.isArray(incident.categories) ? incident.categories : []).map(value => text(value)).join(", ") || text(incident.category);
-  categories.append(categoriesTitle, categoriesText); content.append(categories);
-  content.append(renderEventIds(Array.isArray(incident.event_ids) ? incident.event_ids : []));
-  content.append(renderRecommendations(Array.isArray(incident.recommendations) ? incident.recommendations : []));
-  elements.detail.replaceChildren(content);
-}
-
-function openIncident(incidentId) {
-  const incident = state.incidents.find(item => item.incident_id === incidentId);
-  if (!incident) return;
-  state.selectedIncidentId = incidentId; renderIncidents(); renderIncidentDetail(incident);
-  elements.drawer.classList.add("open"); elements.drawer.setAttribute("aria-hidden", "false"); elements.backdrop.hidden = false;
-}
-
-function closeDrawer() {
-  elements.drawer.classList.remove("open"); elements.drawer.setAttribute("aria-hidden", "true"); elements.backdrop.hidden = true;
-}
-
-async function refreshDashboard() {
-  if (state.refreshing) return;
-  state.refreshing = true; elements.refresh.disabled = true; elements.status.textContent = "Refreshing"; elements.error.hidden = true;
-  try {
-    const [health, stats, incidents, alerts] = await Promise.all([request("/health"), request("/statistics"), request("/incidents"), request("/alerts")]);
-    state.incidents = Array.isArray(incidents) ? incidents : [];
-    setKpis(stats || {}); renderSeverityDistribution(stats || {}); populateCategories(state.incidents); renderIncidents(); renderAlerts(Array.isArray(alerts) ? alerts : []);
-    const healthy = health && health.status === "ok";
-    elements.status.textContent = healthy ? "Healthy" : "Unavailable"; elements.status.className = healthy ? "healthy" : "unavailable";
-    elements.updated.textContent = `Last updated: ${formatTimestamp(new Date().toISOString())}`;
-    if (state.selectedIncidentId) { const selected = state.incidents.find(item => item.incident_id === state.selectedIncidentId); if (selected) renderIncidentDetail(selected); }
-  } catch (error) {
-    elements.status.textContent = "Unavailable"; elements.status.className = "unavailable";
-    elements.error.textContent = `Unable to refresh dashboard data. ${text(error.message, "Please try again.")}`; elements.error.hidden = false;
-  } finally { state.refreshing = false; elements.refresh.disabled = false; }
-}
-
-elements.refresh.addEventListener("click", refreshDashboard);
-elements.severity.addEventListener("change", renderIncidents); elements.category.addEventListener("change", renderIncidents);
-document.querySelector("#drawer-close").addEventListener("click", closeDrawer); elements.backdrop.addEventListener("click", closeDrawer);
-refreshDashboard(); window.setInterval(refreshDashboard, 15000);
+ui.refresh.addEventListener("click", refresh); [ui.severity, ui.category].forEach(filter => filter.addEventListener("change", () => { state.page = 1; renderIncidents(); })); $("#drawer-close").addEventListener("click", closeDrawer); ui.backdrop.addEventListener("click", closeDrawer); refresh(); window.setInterval(refresh, 15000);
