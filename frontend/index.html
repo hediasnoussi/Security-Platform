@@ -15,10 +15,11 @@
         <div class="brand-block">
           <p class="eyebrow">SOC CONSOLE / LIVE VIEW</p>
           <h1>Security Monitoring Platform</h1>
-          <p class="subtitle">Wazuh-based security analysis and incident triage</p>
+          <p class="subtitle">Wazuh-based security analysis and correlation</p>
         </div>
         <div class="header-actions">
-          <span id="connection-status" class="connection-status">Loading data</span>
+          <span class="system-status">System status: <strong id="connection-status">Loading</strong></span>
+          <span id="last-updated" class="last-updated">Last updated: -</span>
           <button id="refresh-button" class="refresh-button" type="button">Refresh</button>
         </div>
       </header>
@@ -33,6 +34,11 @@
 
       <p id="error-message" class="error-message" role="alert" hidden></p>
 
+      <section class="panel severity-summary" aria-labelledby="severity-summary-title">
+        <div class="section-heading"><div><p class="section-label">Operational Overview</p><h2 id="severity-summary-title">Incident Severity Distribution</h2></div></div>
+        <div id="severity-distribution" class="severity-distribution"></div>
+      </section>
+
       <section class="panel incidents-panel">
         <div class="section-heading">
           <div><p class="section-label">Active Investigation Queue</p><h2>Incidents</h2></div>
@@ -45,7 +51,7 @@
       </section>
 
       <section class="panel alerts-panel">
-        <div class="section-heading"><div><p class="section-label">Latest Signals</p><h2>Recent Alerts</h2></div><span id="last-updated" class="last-updated"></span></div>
+        <div class="section-heading"><div><p class="section-label">Latest Signals</p><h2>Recent Alerts</h2></div></div>
         <div class="table-scroll"><table><thead><tr><th>Timestamp</th><th>Rule ID</th><th>Description</th><th>Category</th><th>Risk Score</th><th>Risk Level</th><th>Agent</th></tr></thead><tbody id="alerts-body"></tbody></table></div>
       </section>
     </main>
