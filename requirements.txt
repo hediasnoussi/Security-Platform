@@ -1,0 +1,4 @@
+# Runtime dependencies for the lightweight API layer.
+fastapi
+uvicorn
+httpx

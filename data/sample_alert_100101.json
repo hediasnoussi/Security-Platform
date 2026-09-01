@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-08-26T10:15:30.000+0000",
+  "id": "1756203330.100101",
+  "rule": {
+    "id": "100101",
+    "level": 12,
+    "description": "Suspicious privilege escalation: user added to sudo group",
+    "groups": [
+      "local",
+      "syslog",
+      "sshd",
+      "privilege_escalation",
+      "sudo",
+      "user_management"
+    ]
+  },
+  "agent": {
+    "id": "001",
+    "name": "compute2-endpoint"
+  },
+  "decoder": {
+    "name": "sshd"
+  },
+  "location": "/var/log/auth.log",
+  "data": {
+    "srcuser": "hedia",
+    "dstuser": "root",
+    "command": "/usr/sbin/usermod -aG sudo wazuh-suspicious",
+    "srcip": "127.0.0.1"
+  },
+  "full_log": "sudo: hedia : TTY=pts/0 ; PWD=/home/hedia ; USER=root ; COMMAND=/usr/sbin/usermod -aG sudo wazuh-suspicious"
+}

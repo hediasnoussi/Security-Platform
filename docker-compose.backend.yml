@@ -1,0 +1,19 @@
+services:
+  security-platform-backend:
+    build:
+      context: .
+    environment:
+      SECURITY_PLATFORM_ALERT_SOURCE: WAZUH
+      SECURITY_PLATFORM_WAZUH_ALERTS_PATH: /wazuh-logs/alerts/alerts.json
+      SECURITY_PLATFORM_MAX_ALERTS: "1000"
+      SECURITY_PLATFORM_REFRESH_BATCH_SIZE: "200"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    volumes:
+      - wazuh_logs:/wazuh-logs:ro
+
+volumes:
+  wazuh_logs:
+    external: true
+    name: single-node_wazuh_logs
