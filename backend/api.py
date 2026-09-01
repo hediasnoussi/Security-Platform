@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 from threading import RLock
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend.alert_source import AlertBatch, AlertSource, DemoAlertSource, WazuhAlertSource
@@ -24,6 +26,7 @@ from backend.risk_score import RiskAssessment, assess_event_risk
 
 DEFAULT_MAX_ALERTS = 1000
 DEFAULT_REFRESH_BATCH_SIZE = 200
+FRONTEND_DIRECTORY = Path(__file__).resolve().parents[1] / "frontend"
 
 
 @dataclass(frozen=True)
@@ -377,6 +380,11 @@ def create_app(service: SecurityAnalysisService | None = None) -> FastAPI:
 
     app = FastAPI(title="Security Platform API", version="0.1.0")
     app.state.analysis_service = service or SecurityAnalysisService()
+    app.mount(
+        "/static",
+        StaticFiles(directory=FRONTEND_DIRECTORY),
+        name="frontend-static",
+    )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(
@@ -417,6 +425,13 @@ def create_app(service: SecurityAnalysisService | None = None) -> FastAPI:
                 "detail": "Internal server error.",
             },
         )
+
+    @app.get(
+        "/",
+        include_in_schema=False,
+    )
+    def dashboard() -> FileResponse:
+        return FileResponse(FRONTEND_DIRECTORY / "index.html")
 
     @app.get(
         "/health",
