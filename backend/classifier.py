@@ -12,6 +12,7 @@ from backend.models import NormalizedAlert
 
 CATEGORY_AUTHENTICATION = "Authentication"
 CATEGORY_PRIVILEGE_ESCALATION = "Privilege Escalation"
+CATEGORY_PRIVILEGED_ACTIVITY = "Privileged Activity"
 CATEGORY_FILE_INTEGRITY = "File Integrity"
 CATEGORY_ACCOUNT_MANAGEMENT = "Account Management"
 CATEGORY_NETWORK = "Network"
@@ -56,7 +57,11 @@ class ClassificationRule:
 GROUP_RULES = (
     ClassificationRule(
         category=CATEGORY_PRIVILEGE_ESCALATION,
-        group_keywords=("privilege_escalation", "sudo", "privilege"),
+        group_keywords=("privilege_escalation",),
+    ),
+    ClassificationRule(
+        category=CATEGORY_PRIVILEGED_ACTIVITY,
+        group_keywords=("sudo",),
     ),
     ClassificationRule(
         category=CATEGORY_FILE_INTEGRITY,
@@ -195,6 +200,10 @@ def classify_alert(alert: NormalizedAlert) -> ClassificationResult:
     text = _alert_text(alert)
     mitre_text = _mitre_text(alert)
 
+    ordinary_sudo_result = _classify_ordinary_sudo(alert, groups, text)
+    if ordinary_sudo_result:
+        return ordinary_sudo_result
+
     group_result = _classify_from_groups(alert, groups)
     if group_result:
         return group_result
@@ -285,6 +294,23 @@ def _classify_from_text(
     return None
 
 
+def _classify_ordinary_sudo(
+    alert: NormalizedAlert,
+    groups: set[str],
+    text: str,
+) -> ClassificationResult | None:
+    rule_id = _safe_lower(getattr(alert, "rule_id", None))
+    if (rule_id == "5402" or "sudo" in groups) and not _is_privilege_modification(text):
+        return ClassificationResult(
+            category=CATEGORY_PRIVILEGED_ACTIVITY,
+            subcategory="Sudo Command",
+            confidence=0.94 if rule_id == "5402" else 0.88,
+            reason="Matched ordinary Wazuh sudo command activity without a privilege change.",
+        )
+
+    return None
+
+
 def _subcategory_for(category: str, alert: NormalizedAlert) -> str:
     groups = _normalized_groups(getattr(alert, "rule_groups", ()))
     text = _alert_text(alert)
@@ -293,6 +319,9 @@ def _subcategory_for(category: str, alert: NormalizedAlert) -> str:
         if "sudo" in groups or _contains_any(text, ("sudo", "wheel")):
             return "Sudo / Group Modification"
         return "Privilege Escalation"
+
+    if category == CATEGORY_PRIVILEGED_ACTIVITY:
+        return "Sudo Command"
 
     if category == CATEGORY_AUTHENTICATION:
         if _contains_any(text, ("failed", "invalid", "failure", "authentication failed")):
@@ -433,3 +462,17 @@ def _matching_text_keywords(text: str, keywords: tuple[str, ...]) -> list[str]:
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword.lower() in text for keyword in keywords)
+
+
+def _is_privilege_modification(text: str) -> bool:
+    return _contains_any(
+        text,
+        (
+            "usermod -ag sudo",
+            "usermod -a -g sudo",
+            "usermod -ag wheel",
+            "usermod -a -g wheel",
+            "added to sudo",
+            "sudo group",
+        ),
+    )

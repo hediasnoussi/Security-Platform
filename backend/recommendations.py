@@ -14,6 +14,7 @@ from backend.classifier import (
     CATEGORY_NETWORK,
     CATEGORY_OTHER,
     CATEGORY_PRIVILEGE_ESCALATION,
+    CATEGORY_PRIVILEGED_ACTIVITY,
     ClassificationResult,
     classify_alert,
 )
@@ -108,6 +109,19 @@ CATEGORY_RULES = {
                 "Verify recent login history for the initiating user.",
                 "Check whether the user's activity matches expected administrative behavior.",
                 "Consider credential rotation if the activity is not legitimate.",
+            ),
+        ),
+    ),
+    CATEGORY_PRIVILEGED_ACTIVITY: (
+        RecommendationRule(
+            category=CATEGORY_PRIVILEGED_ACTIVITY,
+            title="Review privileged command",
+            description="Confirm that the sudo command and its execution context were authorized.",
+            rationale="Routine sudo use can be legitimate, but the command context should be reviewed when it is unexpected.",
+            actions=(
+                "Review the exact sudo command, initiating user, endpoint, and time.",
+                "Confirm that the administrative activity matches an approved task.",
+                "Inspect nearby authentication and command events if the activity is unusual.",
             ),
         ),
     ),

@@ -19,6 +19,7 @@ from backend.classifier import (
     CATEGORY_NETWORK,
     CATEGORY_OTHER,
     CATEGORY_PRIVILEGE_ESCALATION,
+    CATEGORY_PRIVILEGED_ACTIVITY,
     ClassificationResult,
     classify_alert,
 )
@@ -521,8 +522,27 @@ def _primary_alert(target: DeduplicatedEvent | CorrelationGroup) -> NormalizedAl
     if isinstance(target, DeduplicatedEvent):
         return target.representative_alert
     if target.events:
-        return target.events[0].representative_alert
+        return max(
+            target.events,
+            key=lambda event: _category_priority(
+                classify_alert(event.representative_alert).category
+            ),
+        ).representative_alert
     return NormalizedAlert()
+
+
+def _category_priority(category: str) -> int:
+    return {
+        CATEGORY_MALWARE: 7,
+        CATEGORY_PRIVILEGE_ESCALATION: 6,
+        CATEGORY_ACCOUNT_MANAGEMENT: 5,
+        CATEGORY_NETWORK: 4,
+        CATEGORY_PRIVILEGED_ACTIVITY: 3,
+        CATEGORY_AUTHENTICATION: 2,
+        CATEGORY_FILE_INTEGRITY: 2,
+        CATEGORY_CONFIGURATION_COMPLIANCE: 1,
+        CATEGORY_OTHER: 0,
+    }.get(category, 0)
 
 
 def _event_ids(target: DeduplicatedEvent | CorrelationGroup) -> tuple[str, ...]:

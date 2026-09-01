@@ -11,9 +11,11 @@ import re
 from typing import Any
 
 from backend.classifier import (
+    CATEGORY_ACCOUNT_MANAGEMENT,
     CATEGORY_AUTHENTICATION,
     CATEGORY_OTHER,
     CATEGORY_PRIVILEGE_ESCALATION,
+    CATEGORY_PRIVILEGED_ACTIVITY,
     classify_alert,
 )
 from backend.models import NormalizedAlert
@@ -261,9 +263,11 @@ def _match_correlation_rules(
         return None
 
     for rule in (
-        _same_agent_user_context_rule,
-        _privilege_escalation_sudo_rule,
         _authentication_burst_rule,
+        _authentication_privilege_modification_rule,
+        _privilege_modification_activity_rule,
+        _authenticated_sudo_session_rule,
+        _authentication_account_change_rule,
     ):
         match = rule(left_event, right_event, left_category, right_category)
         if match is not None:
@@ -272,47 +276,91 @@ def _match_correlation_rules(
     return None
 
 
-def _same_agent_user_context_rule(
+def _authentication_privilege_modification_rule(
     left_event: DeduplicatedEvent,
     right_event: DeduplicatedEvent,
     left_category: str,
     right_category: str,
 ) -> _CorrelationMatch | None:
-    if CATEGORY_OTHER in (left_category, right_category):
+    if {left_category, right_category} != {
+        CATEGORY_AUTHENTICATION,
+        CATEGORY_PRIVILEGE_ESCALATION,
+    }:
         return None
-    if _event_agent_id(left_event) != _event_agent_id(right_event):
-        return None
-
-    shared_users = _event_users(left_event) & _event_users(right_event)
-    if not shared_users:
+    if not _same_agent_with_shared_user(left_event, right_event):
         return None
 
     return _CorrelationMatch(
         correlation_type="same_agent_user_context",
-        reason=(
-            "Events share the same agent and user context: "
-            f"{', '.join(sorted(shared_users))}."
-        ),
+        reason="Authentication activity is linked to a privilege modification for the same user.",
     )
 
 
-def _privilege_escalation_sudo_rule(
+def _privilege_modification_activity_rule(
     left_event: DeduplicatedEvent,
     right_event: DeduplicatedEvent,
     left_category: str,
     right_category: str,
 ) -> _CorrelationMatch | None:
-    categories = {left_category, right_category}
-    if CATEGORY_PRIVILEGE_ESCALATION not in categories:
+    if {left_category, right_category} != {
+        CATEGORY_PRIVILEGE_ESCALATION,
+        CATEGORY_PRIVILEGED_ACTIVITY,
+    }:
         return None
-    if _event_agent_id(left_event) != _event_agent_id(right_event):
-        return None
-    if not (_event_contains_text(left_event, "sudo") or _event_contains_text(right_event, "sudo")):
+    if not _same_agent_with_shared_user(left_event, right_event):
         return None
 
     return _CorrelationMatch(
-        correlation_type="privilege_escalation_sudo_context",
-        reason="Privilege escalation activity is close to sudo-related activity.",
+        correlation_type="privilege_modification_followed_by_activity",
+        reason="A privilege modification is followed by privileged activity for the same user.",
+    )
+
+
+def _authenticated_sudo_session_rule(
+    left_event: DeduplicatedEvent,
+    right_event: DeduplicatedEvent,
+    left_category: str,
+    right_category: str,
+) -> _CorrelationMatch | None:
+    if {left_category, right_category} != {
+        CATEGORY_AUTHENTICATION,
+        CATEGORY_PRIVILEGED_ACTIVITY,
+    }:
+        return None
+    if not _same_agent_with_shared_user(left_event, right_event):
+        return None
+    authentication_event = (
+        left_event if left_category == CATEGORY_AUTHENTICATION else right_event
+    )
+    if not _event_contains_text(authentication_event, "success") and not _event_contains_text(
+        authentication_event,
+        "accepted",
+    ) and not _event_contains_text(authentication_event, "session opened"):
+        return None
+
+    return _CorrelationMatch(
+        correlation_type="authenticated_sudo_session",
+        reason="A successful authentication is followed by a sudo command for the same user.",
+    )
+
+
+def _authentication_account_change_rule(
+    left_event: DeduplicatedEvent,
+    right_event: DeduplicatedEvent,
+    left_category: str,
+    right_category: str,
+) -> _CorrelationMatch | None:
+    if {left_category, right_category} != {
+        CATEGORY_AUTHENTICATION,
+        CATEGORY_ACCOUNT_MANAGEMENT,
+    }:
+        return None
+    if not _same_agent_with_shared_user(left_event, right_event):
+        return None
+
+    return _CorrelationMatch(
+        correlation_type="authentication_account_change",
+        reason="Authentication activity is linked to an account change for the same user.",
     )
 
 
@@ -338,6 +386,16 @@ def _authentication_burst_rule(
     return _CorrelationMatch(
         correlation_type="authentication_burst",
         reason="Authentication events share the same agent and source context.",
+    )
+
+
+def _same_agent_with_shared_user(
+    left_event: DeduplicatedEvent,
+    right_event: DeduplicatedEvent,
+) -> bool:
+    return (
+        _event_agent_id(left_event) == _event_agent_id(right_event)
+        and bool(_event_users(left_event) & _event_users(right_event))
     )
 
 
