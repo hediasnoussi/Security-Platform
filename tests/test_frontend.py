@@ -16,7 +16,7 @@ class FrontendDeliveryTestCase(unittest.TestCase):
         self.assertIn("Security Monitoring Platform", response.text)
         self.assertIn("Security Posture", response.text)
         self.assertIn("Priority Threat", response.text)
-        self.assertIn("Correlated Attack Path", response.text)
+        self.assertIn("Attack Correlation Flow", response.text)
 
     def test_frontend_static_assets_are_reachable(self) -> None:
         for asset in ("/static/styles.css", "/static/app.js"):
