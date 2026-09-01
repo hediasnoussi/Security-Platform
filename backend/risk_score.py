@@ -53,6 +53,7 @@ CORRELATION_EXTRA_EVENT_POINTS = 2.0
 CORRELATION_CATEGORY_DIVERSITY_POINTS = 4.0
 CORRELATION_MAX_POINTS = 18.0
 SENSITIVE_ACTION_MAX_POINTS = 18.0
+ROUTINE_SESSION_MAX_SCORE = 74
 
 
 @dataclass(frozen=True)
@@ -104,12 +105,21 @@ def _assess_risk(
 ) -> RiskAssessment:
     alerts = _alerts_from_events(events)
     categories = _event_categories(events)
+    routine_session = _is_routine_authenticated_sudo_session(categories)
 
     severity = _severity_factor(alerts)
     category = _category_factor(categories)
-    repetition = _repetition_factor(events)
-    correlation = _correlation_factor(events, categories, is_correlated)
-    sensitive_action = _sensitive_action_factor(alerts)
+    repetition = _repetition_factor(events, routine_session=routine_session)
+    correlation = _correlation_factor(
+        events,
+        categories,
+        is_correlated,
+        routine_session=routine_session,
+    )
+    sensitive_action = _sensitive_action_factor(
+        alerts,
+        routine_session=routine_session,
+    )
 
     raw_score = (
         severity["points"]
@@ -119,6 +129,8 @@ def _assess_risk(
         + sensitive_action["points"]
     )
     score = _clamp_score(round(raw_score))
+    if routine_session:
+        score = min(score, ROUTINE_SESSION_MAX_SCORE)
     level = _risk_level(score)
     factors = {
         "severity": severity,
@@ -173,20 +185,26 @@ def _category_factor(categories: tuple[str, ...]) -> dict[str, Any]:
     }
 
 
-def _repetition_factor(events: tuple[DeduplicatedEvent, ...]) -> dict[str, Any]:
+def _repetition_factor(
+    events: tuple[DeduplicatedEvent, ...],
+    *,
+    routine_session: bool = False,
+) -> dict[str, Any]:
     logical_event_count = len(events)
     duplicate_observation_count = sum(max(event.duplicate_count - 1, 0) for event in events)
-    points = min(
-        duplicate_observation_count * REPETITION_DUPLICATE_POINTS
-        + max(logical_event_count - 1, 0) * REPETITION_EVENT_POINTS,
-        REPETITION_MAX_POINTS,
+    logical_event_points = max(logical_event_count - 1, 0) * REPETITION_EVENT_POINTS
+    duplicate_observation_points = (
+        0.0 if routine_session else duplicate_observation_count * REPETITION_DUPLICATE_POINTS
     )
+    maximum_points = 6.0 if routine_session else REPETITION_MAX_POINTS
+    points = min(logical_event_points + duplicate_observation_points, maximum_points)
 
     return {
         "logical_event_count": logical_event_count,
         "duplicate_observation_count": duplicate_observation_count,
+        "duplicate_observations_suppressed": routine_session,
         "points": round(points, 2),
-        "max_points": REPETITION_MAX_POINTS,
+        "max_points": maximum_points,
     }
 
 
@@ -194,6 +212,8 @@ def _correlation_factor(
     events: tuple[DeduplicatedEvent, ...],
     categories: tuple[str, ...],
     is_correlated: bool,
+    *,
+    routine_session: bool = False,
 ) -> dict[str, Any]:
     if not is_correlated or len(events) < 2:
         return {
@@ -208,18 +228,24 @@ def _correlation_factor(
     points = CORRELATION_BASE_POINTS
     points += max(len(events) - 2, 0) * CORRELATION_EXTRA_EVENT_POINTS
     points += max(category_count - 1, 0) * CORRELATION_CATEGORY_DIVERSITY_POINTS
-    points = min(points, CORRELATION_MAX_POINTS)
+    maximum_points = 10.0 if routine_session else CORRELATION_MAX_POINTS
+    points = min(points, maximum_points)
 
     return {
         "correlated": True,
         "event_count": len(events),
         "category_count": category_count,
+        "routine_session": routine_session,
         "points": round(points, 2),
-        "max_points": CORRELATION_MAX_POINTS,
+        "max_points": maximum_points,
     }
 
 
-def _sensitive_action_factor(alerts: tuple[NormalizedAlert, ...]) -> dict[str, Any]:
+def _sensitive_action_factor(
+    alerts: tuple[NormalizedAlert, ...],
+    *,
+    routine_session: bool = False,
+) -> dict[str, Any]:
     points = 0.0
     reasons: list[str] = []
 
@@ -232,7 +258,7 @@ def _sensitive_action_factor(alerts: tuple[NormalizedAlert, ...]) -> dict[str, A
             reasons.append("sudo privilege modification")
 
         if _is_privileged_command(alert, text):
-            points += 6.0
+            points = max(points, 6.0) if routine_session else points + 6.0
             reasons.append("privileged command context")
 
         if _contains_any(
@@ -253,6 +279,11 @@ def _sensitive_action_factor(alerts: tuple[NormalizedAlert, ...]) -> dict[str, A
         "points": round(min(points, SENSITIVE_ACTION_MAX_POINTS), 2),
         "max_points": SENSITIVE_ACTION_MAX_POINTS,
     }
+
+
+def _is_routine_authenticated_sudo_session(categories: tuple[str, ...]) -> bool:
+    category_set = set(categories)
+    return category_set == {CATEGORY_AUTHENTICATION, CATEGORY_PRIVILEGED_ACTIVITY}
 
 
 def _alerts_from_events(events: tuple[DeduplicatedEvent, ...]) -> tuple[NormalizedAlert, ...]:

@@ -416,6 +416,8 @@ def _incident_title(
 ) -> str:
     if isinstance(target, CorrelationGroup):
         primary_category = classification.category.lower()
+        if primary_category.endswith(" activity"):
+            return f"Correlated {primary_category}"
         if len(target.categories) > 1:
             return f"Correlated {primary_category} activity"
         return f"Correlated {primary_category} incident"

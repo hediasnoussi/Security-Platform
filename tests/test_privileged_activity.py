@@ -47,12 +47,12 @@ def _alert(
     )
 
 
-def _sudo_alert(alert_id: str, timestamp: str) -> object:
+def _sudo_alert(alert_id: str, timestamp: str, level: int = 3) -> object:
     return _alert(
         alert_id,
         timestamp,
         "5402",
-        3,
+        level,
         "Successful sudo to ROOT executed.",
         ["syslog", "sudo"],
         destination_user="root",
@@ -173,6 +173,63 @@ class PrivilegedActivityRegressionTestCase(unittest.TestCase):
         self.assertEqual(len(groups), 1)
         self.assertNotEqual(assess_correlation_risk(groups[0]).level, "Critical")
 
+    def test_routine_sudo_session_title_does_not_repeat_activity(self) -> None:
+        events = deduplicate_alerts(
+            [
+                _successful_login("auth-1", "2026-09-01T10:00:00+00:00"),
+                _sudo_alert("sudo-1", "2026-09-01T10:00:30+00:00"),
+            ]
+        )
+
+        incident = create_incident(correlate_events(events)[0])
+
+        self.assertEqual(incident.title, "Correlated privileged activity")
+        self.assertNotIn("activity activity", incident.title.lower())
+
+    def test_multiple_routine_sudo_commands_do_not_become_critical(self) -> None:
+        events = deduplicate_alerts(
+            [
+                _successful_login("auth-1", "2026-09-01T10:00:00+00:00"),
+                _sudo_alert("sudo-1", "2026-09-01T10:00:20+00:00"),
+                _sudo_alert("sudo-2", "2026-09-01T10:00:40+00:00"),
+                _sudo_alert("sudo-3", "2026-09-01T10:01:00+00:00"),
+            ]
+        )
+
+        assessment = assess_correlation_risk(correlate_events(events)[0])
+
+        self.assertNotEqual(assessment.level, "Critical")
+        self.assertLessEqual(assessment.score, 74)
+
+    def test_routine_session_is_capped_at_high_even_with_high_wazuh_level(self) -> None:
+        events = deduplicate_alerts(
+            [
+                _successful_login("auth-1", "2026-09-01T10:00:00+00:00"),
+                _sudo_alert("sudo-1", "2026-09-01T10:00:30+00:00", level=15),
+            ]
+        )
+
+        assessment = assess_correlation_risk(correlate_events(events)[0])
+
+        self.assertEqual(assessment.level, "High")
+        self.assertEqual(assessment.score, 74)
+
+    def test_duplicate_pam_observations_do_not_inflate_routine_session_risk(self) -> None:
+        events = deduplicate_alerts(
+            [
+                _successful_login("auth-1", "2026-09-01T10:00:00+00:00"),
+                _successful_login("auth-2", "2026-09-01T10:00:01+00:00"),
+                _sudo_alert("sudo-1", "2026-09-01T10:00:30+00:00"),
+            ]
+        )
+
+        assessment = assess_correlation_risk(correlate_events(events)[0])
+
+        self.assertEqual(assessment.factors["repetition"]["logical_event_count"], 2)
+        self.assertEqual(assessment.factors["repetition"]["duplicate_observation_count"], 1)
+        self.assertTrue(assessment.factors["repetition"]["duplicate_observations_suppressed"])
+        self.assertNotEqual(assessment.level, "Critical")
+
     def test_authentication_and_privilege_modification_correlate(self) -> None:
         events = deduplicate_alerts(
             [
@@ -187,6 +244,19 @@ class PrivilegedActivityRegressionTestCase(unittest.TestCase):
         self.assertIn(
             assess_correlation_risk(groups[0]).level,
             {"High", "Critical"},
+        )
+
+    def test_authentication_and_rule_100101_can_be_critical(self) -> None:
+        events = deduplicate_alerts(
+            [
+                _successful_login("auth-1", "2026-09-01T10:00:00+00:00"),
+                _privilege_modification_alert("priv-1", "2026-09-01T10:00:30+00:00"),
+            ]
+        )
+
+        self.assertEqual(
+            assess_correlation_risk(correlate_events(events)[0]).level,
+            "Critical",
         )
 
     def test_multistage_attack_sequence_is_critical(self) -> None:
