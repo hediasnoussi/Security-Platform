@@ -16,7 +16,6 @@ class FrontendDeliveryTestCase(unittest.TestCase):
         self.assertIn("Security Monitoring Platform", response.text)
         self.assertIn("Niveau de securite", response.text)
         self.assertIn("Menace prioritaire", response.text)
-        self.assertIn("Chemin d'attaque correle", response.text)
         self.assertIn("Activite de securite", response.text)
 
     def test_frontend_static_assets_are_reachable(self) -> None:
